@@ -17,15 +17,15 @@ In this HL-HGAT package, we provide the transformation of the original graph to 
 conda create -n HLHGCNN python=3.9
 conda activate HLHGCNN
 
-conda install pytorch=1.12 torchvision torchaudio pytorch-cuda=10.2 -c pytorch -c nvidia
+conda install pytorch==1.12.1 torchvision==0.13.1 torchaudio==0.12.1 cudatoolkit=10.2 -c pytorch
 conda install pyg=2.1 -c pyg -c conda-forge
 pip install pyg-lib -f https://data.pyg.org/whl/torch-1.12.1+cu102.html
 # https://data.pyg.org/whl/torch-1.12.1%2Bcu102.html
 # RDKit is required for OGB-LSC PCQM4Mv2 and datasets derived from it.  
 
 conda install -c conda-forge torchmetrics
-conda install -c conda-forge torch-scatter
-conda install pytorch-cluster -c pyg
+# conda install -c conda-forge torch-scatter
+# conda install pytorch-cluster -c pyg
 conda install -c conda-forge timm
 conda install -c anaconda networkx
 conda install -c conda-forge mat73
