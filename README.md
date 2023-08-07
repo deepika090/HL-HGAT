@@ -10,7 +10,7 @@ This project introduces a novel approach to transform a traditional graph into a
 In this HL-HGAT package, we provide the transformation of the original graph to a simplex graph. Then we provide a detailed implementation of the proposed model. HL-HGAT is built using PyG and Pytorch.
 
 ## Python environment setup with Conda
-
+cu102 should be replaced by the specific CUDA versions!
 ```bash
 conda create -n HLHGCNN python=3.9
 conda activate HLHGCNN
@@ -28,8 +28,10 @@ conda install -c conda-forge torchmetrics
 conda clean --all
 ```
 
+## Results
+Data
 <picture>
- <img alt="Model Architecture" src="Architecture_v2.png">
+ <img alt="Model Architecture" src="TSP_simulation.png">
 </picture>
 
 
