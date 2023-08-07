@@ -28,11 +28,34 @@ conda install -c conda-forge torchmetrics
 conda clean --all
 ```
 
+
 ## Results
-Data
+An example of the simulation result for the traveling salesman problem. We visualize the averaged node and edge features after every two convolutional layers in the HL-HGAT. The ground truth is displayed at the center of the figure. The grey and red color bars represent node and edge features, respectively. The code of figure generation is included in TSP_VISUALIZATION.ipynb.
+
 <picture>
- <img alt="Model Architecture" src="TSP_simulation.png">
+ <img alt="results" src="TSP_simulation.png">
 </picture>
+
+
+## Usage
+```bash
+# train peptide func (pyr: HL-HGAT without pooling; attpool: HL-HGAT)
+python main_pepfunc_HL_HGCNN_dense_int3_pyr.py
+python main_pepfunc_HL_HGCNN_dense_int3_attpool.py
+
+# train zinc
+python main_zinc_HL_HGCNN_dense_int3_pyr.py
+python main_zinc_HL_HGCNN_dense_int3_attpool.py
+
+# train cifar10 superpixel
+python main_cifar10SP_HL_HGCNN_dense_int3_pyr.py
+python main_cifar10SP_HL_HGCNN_dense_int3_attpool.py
+
+# train TSP
+python main_TSP_HL_HGCNN_dense_int3_pyr.py
+```
+
+
 
 
 
