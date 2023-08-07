@@ -2,9 +2,7 @@
 Heterogeneous Graph Convolutional Neural Network via Hodge-Laplacian
 
 <picture>
-<!--  <source media="(prefers-color-scheme: dark)" srcset="YOUR-DARKMODE-IMAGE"> -->
-<!--  <source media="(prefers-color-scheme: light)" srcset="YOUR-LIGHTMODE-IMAGE"> -->
- <img alt="YOUR-ALT-TEXT" src="Architecture.png">
+ <img alt="Model Architecture" src="Architecture_v2.png">
 </picture>
 
 This project introduces a novel approach to transform a traditional graph into a simplex graph, where nodes, edges, and higher-order interactions are characterized by different-dimensional simplices. We propose the Hodge-Laplacian Heterogeneous Graph Attention Network (HL-HGAT), which enables simultaneous learning of features on different-dimensional simplices.
@@ -16,20 +14,23 @@ In this HL-HGAT package, we provide the transformation of the original graph to 
 ```bash
 conda create -n HLHGCNN python=3.9
 conda activate HLHGCNN
-
 conda install pytorch==1.12.1 torchvision==0.13.1 torchaudio==0.12.1 cudatoolkit=10.2 -c pytorch
-conda install pyg=2.1 -c pyg -c conda-forge
-pip install pyg-lib -f https://data.pyg.org/whl/torch-1.12.1+cu102.html
-# https://data.pyg.org/whl/torch-1.12.1%2Bcu102.html
-# RDKit is required for OGB-LSC PCQM4Mv2 and datasets derived from it.  
 
-conda install -c conda-forge torchmetrics
-# conda install -c conda-forge torch-scatter
-# conda install pytorch-cluster -c pyg
+pip install -y torch-cluster==1.6.0     -f https://pytorch-geometric.com/whl/torch-1.12.1+cu102.html
+pip install torch-scatter==2.0.9     -f https://pytorch-geometric.com/whl/torch-1.12.1+cu102.html
+pip install torch-sparse==0.6.15      -f https://pytorch-geometric.com/whl/torch-1.12.1+cu102.html
+pip install torch-geometric -f https://data.pyg.org/whl/torch-1.12.1+cu102.html
+
 conda install -c conda-forge timm
 conda install -c anaconda networkx
 conda install -c conda-forge mat73
-conda install -c anaconda scipy
-
+conda install -c conda-forge torchmetrics
 conda clean --all
 ```
+
+<picture>
+ <img alt="Model Architecture" src="Architecture_v2.png">
+</picture>
+
+
+
