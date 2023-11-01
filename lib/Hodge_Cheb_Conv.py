@@ -9,6 +9,7 @@ from typing import Optional
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.nn import Dropout
 from torch import Tensor
 from torch.nn import Parameter
 from torch_geometric.nn.conv import MessagePassing
@@ -18,31 +19,48 @@ from torch_geometric.typing import OptTensor
 from torch_geometric.nn.pool import graclus, max_pool
 from torch_geometric.data import Data, Batch
 from torch_scatter import scatter
-from torch_geometric.utils import add_self_loops, dense_to_sparse
+from torch_geometric.utils import add_self_loops, dense_to_sparse, degree
 from typing import Callable, Optional, Tuple, Union
+import torch_geometric.nn as gnn
+from torch_scatter import scatter_add, scatter_max, scatter_add, scatter_mean
 
-from torch_scatter import scatter_add, scatter_max
-
+from lib.Hodge_Dataset import *
 from torch_geometric.utils import unbatch_edge_index,softmax
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 import torch_geometric.utils as ut
 from scipy.sparse.linalg import eigsh
 
-###############################################################################
-def unbatch_edge_attr(edge_index: Tensor, edge_attr: Tensor, batch: Tensor):
-    deg = ut.degree(batch, dtype=torch.int64)
-    ptr = torch.cat([deg.new_zeros(1), deg.cumsum(dim=0)[:-1]], dim=0)
+###############################################
+########### Modularized HL-HGAT ###############
+###############################################
+class SAPool(torch.nn.Module):
+    def __init__(self, d=64, dk=32):
+        '''
+        d: input feature dim
+        dk: feature dim of key & query
+        '''
+        super().__init__()
+        self.NEAtt = MSI(d=d, dk=dk, only_att=True, sigma=nn.Sigmoid())
 
-    edge_batch = batch[edge_index[0]]
-    edge_index = edge_index - ptr[edge_batch]
-    sizes = ut.degree(edge_batch, dtype=torch.int64).cpu().tolist()
-    return edge_index.split(sizes, dim=1), edge_attr.split(sizes, dim=0)
+    def forward(self, x_t0, x_s0, par_1, D, datas, pos_ts, pos_ss, k, device='cuda:0'):     
+        att_t, att_s = self.NEAtt(x_t0, x_s0, par_1, D)
+        x_t0 = x_t0 * att_t
+        x_s0 = x_s0 * att_s
+        pos_t, pos_s = pos_ts[k], pos_ss[k]
+        x_t0 = scatter_mean(x_t0,pos_t.to(torch.long),dim=0)
+        x_s0 = x_s0[~torch.isinf(pos_s).view(-1)]
+        pos_s = pos_s[~torch.isinf(pos_s).view(-1)]
+        x_s0 = scatter_mean(x_s0,pos_s.to(torch.long),dim=0)
+        edge_index_s, edge_weight_s = datas[k+1].edge_index_s.to(device), datas[k+1].edge_weight_s.to(device)
+        edge_index_t, edge_weight_t = datas[k+1].edge_index_t.to(device), datas[k+1].edge_weight_t.to(device)
+        k += 1
+        par_1 = adj2par1(datas[k].edge_index.to(device), x_t0.shape[0], x_s0.shape[0])
+        D = degree(datas[k].edge_index.view(-1).to(device),num_nodes=x_t0.shape[0]) + 1e-6
+        return  x_t0, x_s0, par_1, D, k, edge_index_t, edge_weight_t, edge_index_s, edge_weight_s, att_t, att_s
 
-
-###############################################################################
-class NodeEdgeInt(nn.Module):
+class MSI(nn.Module):
     # node edge interaction module
-    def __init__(self, d=64, dk=32, dv=64, dl=64, only_att=False, sigma=nn.Sigmoid()):
+    def __init__(self, d=64, dk=32, dv=64, dl=64, only_att=False, sigma=nn.Sigmoid(), l=0.9):
         # d: input feature dim
         # dk: feature dim of key & query
         # dv: feature dim of value
@@ -75,8 +93,202 @@ class NodeEdgeInt(nn.Module):
                 nn.Linear(dl, dv),
                 nn.BatchNorm1d(dv),
                 nn.ReLU())
-        self.lambda_Node = 0.5#self.sigma(nn.Parameter(torch.zeros(1)).to(device))
-        self.lambda_Edge = 0.5#self.sigma(nn.Parameter(torch.zeros(1)).to(device))
+        self.lambda_Node = l#self.sigma(nn.Parameter(torch.zeros(1)).to(device))
+        self.lambda_Edge = l#self.sigma(nn.Parameter(torch.zeros(1)).to(device))
+        
+    def forward(self, x_t, x_s, par, D):    
+        x_s2t = (1/D).view(-1,1)*torch.sparse.mm(par.abs(), x_s)
+        x_t2s = torch.sparse.mm(par.abs().transpose(0,1), x_t)/2
+        # print(x_t.shape, x_s.shape, x_s2t.shape, x_t2s.shape)
+        if self.only_att:
+            # print(x_t.shape, x_s.shape, x_s2t.shape, x_t2s.shape,)
+            a_t = self.sigma(( (1-self.lambda_Node)*(self.WQ_Edge(x_s2t)*(self.WK_Node(x_t))).sum(dim=1, keepdim=True)
+                              + self.lambda_Node*(self.WQ_Node(x_t)*self.WK_Node(x_t)).sum(dim=1, keepdim=True)
+                              )/np.sqrt(self.dk))
+            a_s = self.sigma(( (1-self.lambda_Edge)*(self.WQ_Node(x_t2s)*(self.WK_Edge(x_s))).sum(dim=1, keepdim=True)
+                              + self.lambda_Edge*(self.WQ_Edge(x_s)*self.WK_Edge(x_s)).sum(dim=1, keepdim=True)
+                              )/np.sqrt(self.dk))    
+            return a_t, a_s
+        else:
+            x_t1 = self.WV_Node(torch.cat([x_s2t, x_t], dim=-1))
+            x_s1 = self.WV_Edge(torch.cat([x_t2s, x_s], dim=-1))
+            return x_t1, x_s1
+
+class HL_filter(torch.nn.Module):
+    def __init__(self, channels=2, filters=32, K=4, node_dim=64, 
+                edge_dim=64, dropout_ratio=0.0, leaky_slope=0.1, if_dense=True):
+        '''
+        HL-filtering layer
+        channels: number of HL-filtering layer
+        filters: number of filters in each layer
+        K: polynomial order
+        node_dim: input node dimension
+        edge_dim: input edge dimension
+        '''
+        self.channels = channels
+        self.filters = filters
+        self.node_dim = node_dim
+        self.edge_dim = edge_dim
+        gcn_outsize = self.filters
+        t_insize = self.node_dim
+        s_insize = self.edge_dim
+        self.if_dense = if_dense
+        super().__init__()
+
+        for j in range(self.channels):
+            if self.if_dense:
+                fc = MSI(d=t_insize, dv=gcn_outsize)
+                setattr(self, 'MSI{}'.format(j), fc)
+                layers = [(HodgeLaguerreConv(gcn_outsize, gcn_outsize, K=K),
+                            'x_t, edge_index_t, edge_weight_t -> x_t'),
+                            (gnn.BatchNorm(gcn_outsize), 'x_t -> x_t'),
+                            (nn.LeakyReLU(negative_slope=leaky_slope), 'x_t -> x_t'),
+                            (Dropout(p=dropout_ratio), 'x_t -> x_t'),
+                            (HodgeLaguerreConv(gcn_outsize, gcn_outsize, K=K),
+                            'x_s, edge_index_s, edge_weight_s -> x_s'),
+                            (gnn.BatchNorm(gcn_outsize), 'x_s -> x_s'),
+                            (nn.LeakyReLU(negative_slope=leaky_slope), 'x_s -> x_s'),
+                            (Dropout(p=dropout_ratio), 'x_s -> x_s'),
+                            (lambda x1, x2: [x1,x2],'x_t, x_s -> x'),]
+                fc = gnn.Sequential('x_t, edge_index_t, edge_weight_t, x_s, edge_index_s, edge_weight_s', layers)
+                setattr(self, 'NEConv{}'.format(j), fc)
+                t_insize = t_insize + gcn_outsize
+                s_insize = s_insize + gcn_outsize
+            else:
+                layers = [(HodgeLaguerreConv(t_insize, gcn_outsize, K=K),
+                            'x_t, edge_index_t, edge_weight_t -> x_t'),
+                            (gnn.BatchNorm(gcn_outsize), 'x_t -> x_t'),
+                            (nn.LeakyReLU(negative_slope=leaky_slope), 'x_t -> x_t'),
+                            (Dropout(p=dropout_ratio), 'x_t -> x_t'),
+                            (HodgeLaguerreConv(s_insize, gcn_outsize, K=K),
+                            'x_s, edge_index_s, edge_weight_s -> x_s'),
+                            (gnn.BatchNorm(gcn_outsize), 'x_s -> x_s'),
+                            (nn.LeakyReLU(negative_slope=leaky_slope), 'x_s -> x_s'),
+                            (Dropout(p=dropout_ratio), 'x_s -> x_s'),
+                            (lambda x1, x2: [x1,x2],'x_t, x_s -> x'),]
+                fc = gnn.Sequential('x_t, edge_index_t, edge_weight_t, x_s, edge_index_s, edge_weight_s', layers)
+                setattr(self, 'NEConv{}'.format(j), fc)
+                t_insize = gcn_outsize
+                s_insize = gcn_outsize
+
+    def forward(self, x_t0, edge_index_t, edge_weight_t, x_s0, edge_index_s, edge_weight_s, par_1=None, D=None):
+        for j in range(self.channels):
+            if self.if_dense:
+                fc = getattr(self, 'MSI{}'.format(j))
+                x_t, x_s = fc(x_t0, x_s0, par_1, D)
+                fc = getattr(self, 'NEConv{}'.format(j))
+                x_t, x_s = fc(x_t, edge_index_t, edge_weight_t, x_s, edge_index_s, edge_weight_s)
+                x_t0 = torch.cat([x_t0, x_t], dim=-1)
+                x_s0 = torch.cat([x_s0, x_s], dim=-1)
+            else:
+                fc = getattr(self, 'NEConv{}'.format(j))
+                x_t, x_s = fc(x_t0, edge_index_t, edge_weight_t, x_s0, edge_index_s, edge_weight_s)
+                x_t0,x_s0 = x_t,x_s
+
+        return x_t0, x_s0
+    
+# class HL_filter(torch.nn.Module):
+#     def __init__(self, channels=2, filters=32, K=4, node_dim=64, 
+#                 edge_dim=64, dropout_ratio=0.0, leaky_slope=0.1, if_dense=True):
+#         '''
+#         HL-filtering layer
+#         channels: number of HL-filtering layer
+#         filters: number of filters in each layer
+#         K: polynomial order
+#         node_dim: input node dimension
+#         edge_dim: input edge dimension
+#         '''
+#         self.channels = channels
+#         self.filters = filters
+#         self.node_dim = node_dim
+#         self.edge_dim = edge_dim
+#         gcn_outsize = self.filters
+#         t_insize = self.node_dim
+#         s_insize = self.edge_dim
+#         self.if_dense = if_dense
+#         super().__init__()
+
+#         for j in range(self.channels):
+#             layers = [(HodgeLaguerreConv(t_insize, gcn_outsize, K=K),
+#                         'x_t, edge_index_t, edge_weight_t -> x_t'),
+#                         (gnn.BatchNorm(gcn_outsize), 'x_t -> x_t'),
+#                         (nn.LeakyReLU(negative_slope=leaky_slope), 'x_t -> x_t'),
+#                         (Dropout(p=dropout_ratio), 'x_t -> x_t'),
+#                         (HodgeLaguerreConv(s_insize, gcn_outsize, K=K),
+#                         'x_s, edge_index_s, edge_weight_s -> x_s'),
+#                         (gnn.BatchNorm(gcn_outsize), 'x_s -> x_s'),
+#                         (nn.LeakyReLU(negative_slope=leaky_slope), 'x_s -> x_s'),
+#                         (Dropout(p=dropout_ratio), 'x_s -> x_s'),
+#                         (lambda x1, x2: [x1,x2],'x_t, x_s -> x'),]
+#             fc = gnn.Sequential('x_t, edge_index_t, edge_weight_t, x_s, edge_index_s, edge_weight_s', layers)
+#             setattr(self, 'NEConv{}'.format(j), fc)
+#             if self.if_dense:
+#                 t_insize = t_insize + gcn_outsize
+#                 s_insize = s_insize + gcn_outsize
+#             else:
+#                 t_insize = gcn_outsize
+#                 s_insize = gcn_outsize
+
+#     def forward(self, x_t0, edge_index_t, edge_weight_t, x_s0, edge_index_s, edge_weight_s):
+#         for j in range(self.channels):
+#             fc = getattr(self, 'NEConv{}'.format(j))
+#             x_t, x_s = fc(x_t0, edge_index_t, edge_weight_t, x_s0, edge_index_s, edge_weight_s)
+#             if self.if_dense:
+#                 x_t0 = torch.cat([x_t0, x_t], dim=-1)
+#                 x_s0 = torch.cat([x_s0, x_s], dim=-1)
+#             else:
+#                 x_t0,x_s0 = x_t,x_s
+
+#         return x_t0, x_s0
+###############################################################################
+def unbatch_edge_attr(edge_index: Tensor, edge_attr: Tensor, batch: Tensor):
+    deg = ut.degree(batch, dtype=torch.int64)
+    ptr = torch.cat([deg.new_zeros(1), deg.cumsum(dim=0)[:-1]], dim=0)
+
+    edge_batch = batch[edge_index[0]]
+    edge_index = edge_index - ptr[edge_batch]
+    sizes = ut.degree(edge_batch, dtype=torch.int64).cpu().tolist()
+    return edge_index.split(sizes, dim=1), edge_attr.split(sizes, dim=0)
+
+
+###############################################################################
+class NodeEdgeInt(nn.Module):
+    # node edge interaction module
+    def __init__(self, d=64, dk=32, dv=64, dl=64, only_att=False, sigma=nn.Sigmoid(), l=0.9):
+        # d: input feature dim
+        # dk: feature dim of key & query
+        # dv: feature dim of value
+        # dl: feature dim of latent
+        # only_att: if true, only output the attention value
+        # sigma: activation function
+        super().__init__()
+        dl = dv
+        self.sigma = sigma
+        self.dk = dk
+        self.only_att = only_att
+        if only_att:
+            self.WQ_Node = nn.Linear(d, dk)
+            self.WK_Node = nn.Linear(d, dk)
+            
+            self.WQ_Edge = nn.Linear(d, dk)
+            self.WK_Edge = nn.Linear(d, dk)
+        else:
+            self.WV_Node = nn.Sequential(
+                nn.Linear(d*2, dl),
+                nn.BatchNorm1d(dl),
+                nn.ReLU(),
+                nn.Linear(dl, dv),
+                nn.BatchNorm1d(dv),
+                nn.ReLU())
+            self.WV_Edge = nn.Sequential(
+                nn.Linear(d*2, dl),
+                nn.BatchNorm1d(dl),
+                nn.ReLU(),
+                nn.Linear(dl, dv),
+                nn.BatchNorm1d(dv),
+                nn.ReLU())
+        self.lambda_Node = l#self.sigma(nn.Parameter(torch.zeros(1)).to(device))
+        self.lambda_Edge = l#self.sigma(nn.Parameter(torch.zeros(1)).to(device))
         
     def forward(self, x_t, x_s, par, D):    
         x_s2t = (1/D).view(-1,1)*torch.sparse.mm(par.abs(), x_s)
@@ -105,7 +317,10 @@ class NodeEdgeInt(nn.Module):
 class Inception1D(nn.Module):
     def __init__(self, in_channels=64, num_channels=8, maxpool=3, if_dim_reduction=False, 
                  leaky_slope=0.1, if_readout=False):
-        # inception module for fmri time course data
+        '''
+        inception module for fmri time course data
+        
+        '''
         super(Inception1D, self).__init__()
         self.in_channels = in_channels
         self.num_channels = num_channels
@@ -140,8 +355,9 @@ class Inception1D(nn.Module):
         x = self.leakyReLU(self.bn2(torch.cat((x1,x2,x3), dim=1)))
         
         if self.if_readout:
-            temp = x.max(dim=-1)
-            return torch.cat([temp[0], x.mean(dim=-1)],dim=-1)
+            # temp = x.max(dim=-1)
+            # return torch.cat([temp[0], x.mean(dim=-1)],dim=-1)
+            return x.mean(dim=-1)
         else:
             return torch.transpose(x,1,2)
     

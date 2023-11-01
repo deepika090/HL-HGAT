@@ -22,6 +22,7 @@ from torch_cluster import graclus_cluster
 from scipy.linalg import eigh
 from lib.LRGBDataset import *
 from sklearn.metrics import average_precision_score
+from scipy.io import savemat
 
 class PairData(Data):
     def __init__(self, edge_index_s=None, x_s=None, edge_index_t=None, x_t=None,
@@ -45,7 +46,29 @@ class PairData(Data):
             return self.x_t.size(0)
         else:
             return super().__inc__(key, value, *args, **kwargs)
+
         
+def visualize(loader, model, device='cuda:0'):
+    model.eval()
+    outs = []
+    y_pred = []
+    ys = []
+     
+    for idx, data in enumerate(loader):  # Iterate in batches over the training/test dataset. 
+        if not isinstance(data, list):
+            data = data.to(device)
+            ys.append(data.y.cpu())
+        else:
+            ys.append(data[0].y.cpu())
+        with torch.no_grad():
+            out, y = model(data, if_final_layer=True)
+            outs.append(out.detach().cpu())
+            y_pred.append(y.detach().cpu())
+    outs = torch.cat(outs, dim=0)
+    ys = torch.cat(ys, dim=0)
+    y_pred = torch.cat(y_pred, dim=0)
+    return outs, ys, y_pred
+
         
 def eval_ap(y_true, y_pred):
     '''
@@ -328,6 +351,56 @@ def MLGC_weighted(data, keig=1):
     graph.num_edge1 = ei1.shape[1]
     graph.num_nodes = c_unique.shape[0]
     return graph, torch.tensor(c_node).view(-1,1), c_edge.view(-1,1)
+
+
+# def MLGC_weighted(data, keig=1):
+#     '''
+#     multi-level graph coarsening (MLGC)
+#     input: 
+#         data: input graph
+#         keig: dim of position encoding
+#     output:
+#         data: output graph
+#         c_node: node assignment matrix
+#         c_edge: edge assignment matrix
+#     '''
+#     c_node = graclus_cluster(data.edge_index_t[0], data.edge_index_t[1],
+#                     torch.ones_like(data.edge_index_t[1]), data.num_node1)
+#     c_unique = torch.unique(c_node)
+#     d = {int(j):i for i,j in enumerate(c_unique)}
+#     c_edge = torch.zeros(data.x_s.shape[0])
+#     c_node = torch.tensor([d[int(c)] for c in c_node])
+#     par = adj2par1(data.edge_index, data.x_t.shape[0], data.edge_index.shape[1]).to_dense()
+#     par1 = scatter_add(par, c_node, dim=0)
+#     Ck = torch.matmul(par1.abs().t(), par1.abs())
+#     mask = torch.ones(Ck.shape[0])
+#     for i in range(Ck.shape[0]):
+#         if Ck[i,i]!=2 or torch.count_nonzero(Ck[:i,i]==2)>0:
+#             mask[i] = 0
+#     par1 = par1.t()[mask.to(torch.bool)].t()
+#     c_edge = torch.matmul(par1.abs().t(), scatter_add(par, c_node, dim=0).abs())
+#     c_edge = c_edge==2
+#     temp = torch.arange(par1.shape[1]).to(torch.float)+1
+#     c_edge = torch.matmul(c_edge.t().to(torch.float), temp.view(-1,1))
+#     c_edge[c_edge == 0] = float('inf')
+#     c_edge = c_edge - 1
+    
+#     L0 = torch.matmul(par1, par1.T)
+#     lambda0, _ = torch.linalg.eigh(L0)
+#     maxeig = lambda0.max()
+#     L0 = 2*torch.matmul(par1, par1.T)/maxeig
+#     L1 = 2*torch.matmul(par1.T, par1)/maxeig
+#     node_pe = torch.ones(par1.shape[0],1) #eig_pe(L0.numpy(), k=keig)
+#     edge_pe = torch.ones(par1.shape[1],1) #eig_pe(L1.numpy(), k=keig)
+#     eit, ewt = dense_to_sparse(L0)
+#     eis, ews = dense_to_sparse(L1)
+#     graph = PairData(x_s=edge_pe, edge_index_s=eis, edge_weight_s=ews,
+#                       x_t=node_pe, edge_index_t=eit, edge_weight_t=ewt,)
+#     graph.edge_index = par2adj(par1)
+#     graph.num_node1 = par1.shape[0]
+#     graph.num_edge1 = par1.shape[1]
+#     graph.num_nodes = par1.shape[0]
+#     return graph, c_node.view(-1,1), c_edge.view(-1,1)
 
 ###############################################################################
 #########################  ZINC  ###########################
@@ -806,6 +879,48 @@ class CIFAR10SP_EigPE_MLGC(Dataset):
             datas[0].x_s = torch.cat([datas[0].x_s,torch.zeros(datas[0].x_s.shape[0], edge_dim+1-datas[0].x_s.shape[1])], dim=-1) * sign
         else:
             datas[0].x_s = datas[0].x_s[:,:self.edge_dim+self.keig] * sign
+        return datas
+        
+    def process(self):
+        return None
+    
+###############################################################################
+#######################  ABCD dataset  #########################
+###############################################################################
+class ABCD_EigPE_MLGC(Dataset):
+    def __init__(self, root, X_t, X_s, Y, pool_num=2, keig=10):
+        # data aug
+        self.root = root
+        self.X_t = X_t
+        self.X_s = X_s
+        self.Y = Y
+        self.keig = keig
+        self.pool_num = pool_num
+        self.node_dim = X_t.shape[-1]
+        self.edge_dim = 1
+        self.size = X_s.shape[0]
+        data_zip = torch.load(osp.join(root, 'ABCD_GRAPH_STRUCTURE.pt'))
+        self.data = data_zip['graph']
+        data_zip = torch.load(osp.join(root, 'ABCD_SUBGRAPH_STRUCTURE0.pt'))
+        self.datas = data_zip['graph']
+        super().__init__(root)
+  
+    @property
+    def processed_file_names(self):
+        return ['hi']#['ABCD'+str(fileidx+1)+'.pt' for fileidx in range(self.len())]
+
+    def len(self):
+        return self.size
+#         return len(self.processed_file_names)
+
+    def get(self,idx):
+        # data = self.data
+        datas = self.datas
+        
+        datas[0].x_s = torch.cat([datas[0].x_s[:,:1],self.X_s[idx].view(-1,1)], dim=-1).to(torch.float)
+        datas[0].x_t = torch.cat([datas[0].x_t[:,:1],self.X_t[idx]], dim=-1).to(torch.float)
+        datas[0].y = self.Y[idx].to(torch.float)
+        
         return datas
         
     def process(self):
