@@ -2,7 +2,7 @@
 Heterogeneous Graph Convolutional Neural Network via Hodge-Laplacian
 
 <picture>
- <img alt="Model Architecture" src="Architecture_v2.png">
+ <img alt="Model Architecture" src="NM_Architecture.pdf">
 </picture>
 
 This project introduces a novel approach to transform a traditional graph into a simplex graph, where nodes, edges, and higher-order interactions are characterized by different-dimensional simplices. We propose the Hodge-Laplacian Heterogeneous Graph Attention Network (HL-HGAT), which enables simultaneous learning of features on different-dimensional simplices.
@@ -33,7 +33,7 @@ conda clean --all
 An example of the simulation result for the traveling salesman problem. We visualize the averaged node and edge features after every two convolutional layers in the HL-HGAT. The ground truth is displayed at the center of the figure. The grey and red color bars represent node and edge features, respectively. The code of figure generation is included in TSP_VISUALIZATION.ipynb.
 
 <picture>
- <img alt="results" src="TSP_simulation.png">
+ <img alt="results" src="tsp_trend.pdf">
 </picture>
 
 
