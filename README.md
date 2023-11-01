@@ -39,23 +39,28 @@ An example of the simulation result for the traveling salesman problem. We visua
 
 ## Usage
 ```bash
-# train peptide func (pyr: HL-HGAT without pooling; attpool: HL-HGAT)
-python main_pepfunc_HL_HGCNN_dense_int3_pyr.py
+# train peptide func (pyr: HL-HGAT (M3); attpool: HL-HGAT (M4))
 python main_pepfunc_HL_HGCNN_dense_int3_attpool.py
 
 # train zinc
-python main_zinc_HL_HGCNN_dense_int3_pyr.py
 python main_zinc_HL_HGCNN_dense_int3_attpool.py
 
 # train cifar10 superpixel
-python main_cifar10SP_HL_HGCNN_dense_int3_pyr.py
 python main_cifar10SP_HL_HGCNN_dense_int3_attpool.py
 
 # train TSP
 python main_TSP_HL_HGCNN_dense_int3_pyr.py
 ```
 
-
-
-
-
+## Citation
+If you find this work useful, please cite our IPMI 2023 paper:
+```bash
+@inproceedings{huang2023heterogeneous,
+  title={Heterogeneous Graph Convolutional Neural Network via Hodge-Laplacian for Brain Functional Data},
+  author={Huang, Jinghan and Chung, Moo K and Qiu, Anqi},
+  booktitle={International Conference on Information Processing in Medical Imaging},
+  pages={278--290},
+  year={2023},
+  organization={Springer}
+}
+```
