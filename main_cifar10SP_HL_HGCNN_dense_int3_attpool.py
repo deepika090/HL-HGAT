@@ -180,18 +180,12 @@ if __name__ == '__main__':
         torch.manual_seed(fold*360)
         print('Fold {} begin'.format(fold))
         temp = str(args.c1) +str(args.c2)+str(args.c3) +'conv'
-        if args.mlp_channels == 1:
-            model = HL_HGCNN_CIFAR10SP_dense_int3_attpool(channels=[args.c1,args.c2,args.c3], filters=[args.filters,args.filters*2,args.filters*4],mlp_channels=[256], 
-                              K=args.K, dropout_ratio=args.dropout_ratio, dropout_ratio_mlp=0.0, keig=keig, pool_loc=1, l=0.5).to(device)  # 4conv
-            save_name = 'HGCNN_dense_int3_eigpe'+str(keig)+'_attpool_cifar10SP_'+temp+'_k'+str(args.K)+'_batch'+str(args.batch_size)+'_mlp1_FOLD{}'.format(fold)
-        elif args.mlp_channels == 2:
-            model = HL_HGCNN_CIFAR10SP_dense_int3_attpool(channels=[args.c1,args.c2,args.c3], filters=[args.filters,args.filters*2,args.filters*4],mlp_channels=[256,256], 
-                              K=args.K, dropout_ratio=args.dropout_ratio, dropout_ratio_mlp=0.0, keig=keig, pool_loc=1, l=0.5).to(device)  # 4conv
-            save_name = 'HGCNN_dense_int3_eigpe'+str(keig)+'_attpool_cifar10SP_'+temp+'_k'+str(args.K)+'_batch'+str(args.batch_size)+'_mlp2_FOLD{}'.format(fold)
-        else:
-            model = HL_HGCNN_CIFAR10SP_dense_int3_attpool(channels=[args.c1,args.c2,args.c3], filters=[args.filters,args.filters*2,args.filters*4],mlp_channels=[], 
-                              K=args.K, dropout_ratio=args.dropout_ratio, dropout_ratio_mlp=0.0, keig=keig, pool_loc=1, l=0.5).to(device)  # 4conv
-            save_name = 'HGCNN_dense_int3_eigpe'+str(keig)+'_attpool_cifar10SP_'+temp+'_k'+str(args.K)+'_batch'+str(args.batch_size)+'_mlp_FOLD{}'.format(fold)
+        mlp_channels = [] if args.mlp_channels==0 else [256]*args.mlp_channels
+        mlp_num = mlp_channels
+        
+        model = HL_HGCNN_CIFAR10SP_dense_int3_attpool(channels=[args.c1,args.c2,args.c3], filters=[args.filters,args.filters*2,args.filters*4],mlp_channels=[256], 
+                          K=args.K, dropout_ratio=args.dropout_ratio, dropout_ratio_mlp=0.0, keig=keig, pool_loc=1, l=0.5).to(device)  # 4conv
+        save_name = 'HGCNN_dense_int3_eigpe'+str(keig)+'_attpool_cifar10SP_'+temp+'_k'+str(args.K)+'_batch'+str(args.batch_size)+'_mlp'+str(mlp_num)+'_FOLD{}'.format(fold)
             
         save_path = './weights/' + save_name + '.pt'
         txt_path = './records/' + save_name + '.txt'
