@@ -31,26 +31,28 @@ import mat73
 import os
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--c1', type=int, default=1, help='layer num in each channel')
-parser.add_argument('--c2', type=int, default=1, help='layer num in each channel')
-parser.add_argument('--c3', type=int, default=1, help='layer num in each channel')
+parser.add_argument('--c1', type=int, default=2, help='layer num in block1')
+parser.add_argument('--c2', type=int, default=2, help='layer num in block2')
+parser.add_argument('--c3', type=int, default=0, help='layer num in block3')
 parser.add_argument('--filters', type=int, default=32, help='filter num in each channel')
-parser.add_argument('--mlp_channels', type=int, default=0, help='mlp_channels')
+parser.add_argument('--mlp_channels', type=int, default=2, help='num of fully connected layers')
 parser.add_argument('--dropout_ratio', type=float, default=0.25, help='dropout_ratio')
 parser.add_argument('--lr', type=float, default=1e-3, help='learning_rate')
-parser.add_argument('--l2', type=float, default=1e-4, help='dropout_ratio')
+parser.add_argument('--l2', type=float, default=1e-3, help='weight decay ratio')
 parser.add_argument('--K', type=int, default=4, help='polynomial order')
 parser.add_argument('--batch_size', type=int, default=32, help='batch size')
-parser.add_argument('--gpu', type=int, default=0, help='gpu index')
-parser.add_argument('--root', type=str, default='/home/jinghan/Documents/MATLAB/Hodge_Laplacian/data/ABCD'
-                    , help='data root')
-parser.add_argument('--fold', type=int, default=-1, help='The second pooling loc')
+# parser.add_argument('--gpu', type=int, default=0, help='gpu index')
+# parser.add_argument('--root', type=str, default='/home/jinghan/Documents/MATLAB/Hodge_Laplacian/data/ABCD'
+                    # , help='data root')
+parser.add_argument('--fold', type=int, default=-1, help='which fold')
 parser.add_argument('--run', type=int, default=1, help='which run (split)')
-parser.add_argument('--finetune', type=int, default=0, help='which run (split)')
-parser.add_argument('--test', type=int, default=0, help='which run (split)')
-parser.add_argument('--pool_loc', type=int, default=0, help='The second pooling loc')
+parser.add_argument('--finetune', type=int, default=0, help='if finetune')
+parser.add_argument('--test', type=int, default=0, help='if test')
+parser.add_argument('--pool_loc', type=int, default=0, help='Pooling loc')
 parser.add_argument('--normmode', type=int, default=0, help='normalization mode')
 parser.add_argument('--threshmode', type=int, default=0, help='thresholding mode')
+parser.add_argument('--k_ratio', type=float, default=0.25, help='top k% values when thresholding')
+parser.add_argument('--seed', type=int, default=10086, help='random seed')
 args = parser.parse_args()
 
 def loadmat(path):
@@ -328,12 +330,12 @@ if __name__ == '__main__':
         os.makedirs(txtfile)
         
     if args.fold == -1:
-        folds = [0,1,2,3]
+        folds = [0,1,2,3,4]
     else:
         folds = [args.fold]
     for fold in folds:
         print('Fold {} begin'.format(fold))
-        torch.manual_seed(10086)
+        torch.manual_seed(args.seed)
         
         #### load data
         batch_size = args.batch_size
@@ -392,7 +394,6 @@ if __name__ == '__main__':
         TS_rest = torch.cat(TS_rest,dim=0).view(-1,268,375)
         IQ_rest = torch.cat(IQ_rest,dim=0).view(-1,1)
         
-        fold = 0
         mask = np.isin(TrainIdx[fold][0]-1, np.array(usable_idx))
         trainidx = TrainIdx[fold][0][mask]-1
         trainidx = np.concatenate((trainidx,np.arange(FC_rest.shape[0])+FC.shape[0]), axis=0)
@@ -400,6 +401,7 @@ if __name__ == '__main__':
         valididx = ValidIdx[fold][0][mask]-1
         mask = np.isin(TestIdx[fold][0]-1, np.array(usable_idx))
         testidx = TestIdx[fold][0][mask]-1
+        trainidx = np.concatenate((trainidx,valididx), axis=0)
         
         IQ = torch.cat([IQ.view(-1,1),IQ_rest],dim=0)
         FC = torch.cat([FC,FC_rest],dim=0)
@@ -410,8 +412,8 @@ if __name__ == '__main__':
             # select top k percent absolute average values
             mean_FC = FC.abs().mean(dim=0)
             mean_FC = mean_FC.triu(1)
-            k_ratio = 0.25
-            v,i = mean_FC[mean_FC>0].topk(k=int(134*267*k_ratio))
+            # args.k_ratio = 0.25
+            v,i = mean_FC[mean_FC>0].topk(k=int(134*267*args.k_ratio))
             mask = mean_FC>v[-1]
             mask = mask.to(torch.long)
             
@@ -421,8 +423,8 @@ if __name__ == '__main__':
             std_FC = FC.abs().std(dim=0)
             mean_FC = std_FC / mean_FC
             mean_FC = mean_FC.triu(1)
-            k_ratio = 0.3
-            v,i = mean_FC[mean_FC>0].topk(k=int(134*267*k_ratio),largest=False)
+            # args.k_ratio = 0.3
+            v,i = mean_FC[mean_FC>0].topk(k=int(134*267*args.k_ratio),largest=False)
             mask = mean_FC<v[-1]
             mask = mask.to(torch.long)
             
@@ -430,9 +432,9 @@ if __name__ == '__main__':
             # select top k percent absolute average values per roi
             mean_FC = FC.abs().mean(dim=0)
             mask = torch.zeros_like(mean_FC)
-            k_ratio = 0.1
+            # args.k_ratio = 0.1
             for i in range(mean_FC.shape[0]):
-                v,i = mean_FC[i].topk(k=int(268*k_ratio))
+                v,i = mean_FC[i].topk(k=int(268*args.k_ratio))
                 temp = mean_FC[i]>v[-1]
                 mask[i] = temp.to(torch.float)
             mask = mask + mask.T
@@ -487,6 +489,7 @@ if __name__ == '__main__':
         X_T = time_norm(Time_series=Time_series, trainidx=trainidx, mode=normmode)
         Y = (IQ - IQ[trainidx].mean())/IQ[trainidx].std()
 
+        print(FC[trainidx].shape)
         trainset = ABCD_MLGC('ABCD', X_T[trainidx], FC[trainidx], Y[trainidx], datas, pool_num=1)
         validset = ABCD_MLGC('ABCD', X_T[valididx], FC[valididx], Y[valididx], datas, pool_num=1)
         testset = ABCD_MLGC('ABCD', X_T[testidx], FC[testidx], Y[testidx], datas, pool_num=1)
@@ -506,7 +509,7 @@ if __name__ == '__main__':
                                                   pool_loc=[0], mlp_channels=mlp_channels, K=args.K, dropout_ratio=args.dropout_ratio, 
                                                   num_nodepedge=num_nodepedge).to(device)#.to(torch.float)
         temp = str(args.c1) +str(args.c2)+str(args.c3) +'conv'+str(args.filters)
-        save_name = 'HGCNN_dense_int3'+'_spool_ABCD_'+temp+'_k'+str(args.K)+'_threshmode'+str(args.threshmode)+'_normmode'+str(args.normmode)+'_mlp'+str(mlp_num)+'_FOLD{}'.format(fold)
+        save_name = 'HGCNN_dense_int3'+'_spool_ABCD_'+temp+'_k'+str(args.K)+'_threshmode'+str(args.threshmode)+'_normmode'+str(args.normmode)+'_kratio'+str(args.k_ratio*100)+'_seed'+str(args.seed)+'_mlp'+str(mlp_num)+'_FOLD{}'.format(fold)
         
         # model(datas)
         
@@ -524,15 +527,16 @@ if __name__ == '__main__':
 
         
         best_corr, best_loss, best_rmse = test(test_loader)
+        print('==================================================================================')
+        print(f'Test Loss: {best_loss:.4f}, Test Corr: {best_corr:.4f}, Test RMSE: {best_rmse:.4f}')
+        print('==================================================================================')
+        
         
         if args.test == 0:
-            print('==================================================================================')
-            print(f'Test Loss: {best_loss:.4f}, Test Corr: {best_corr:.4f}, Test RMSE: {best_rmse:.4f}')
-            print('==================================================================================')
             for epoch in range(1, 20):
                 total_loss, train_corr = train(train_loader)
-                valid_corr, valid_loss, valid_rmse = test(test_loader)
-                scheduler.step(total_loss)
+                valid_corr, valid_loss, valid_rmse = test(valid_loader)
+                scheduler.step(valid_loss)
                 if optimizer.param_groups[-1]['lr']<5e-6:
                     break    
                 
@@ -548,16 +552,16 @@ if __name__ == '__main__':
                     print('==================================================================================')
                     print(f'Test Loss: {best_loss1:.4f}, Test Corr: {best_corr1:.4f}, Test RMSE: {best_rmse1:.4f}')
                     print('==================================================================================')
-        else:
+        # else:
             # testset = Subset(dataset, randseed_all['testset'][fold][0].squeeze()-1)
             # test_loader = DataLoader(testset, batch_size=batch_size, num_workers=4)
-            model.load_state_dict(torch.load(load_path))
+            # model.load_state_dict(torch.load(load_path))
             # best_corr, best_loss, best_rmse = test(test_loader)
             # print('==================================================================================')
             # print(f'Test Loss: {best_loss:.4f}, Test Corr: {best_corr:.4f}, Test RMSE: {best_rmse:.4f}')
             # print('==================================================================================')
             
-            mat_path = './Visualization/HGAT_pyr_all_mlp1_fold{}.mat'.format(fold)
-            xs, ys, y_pred = visualize(test_loader, model)
-            data_zip = {'x':xs.numpy(), 'y':ys.numpy(), 'y_pred':y_pred.numpy()}
-            savemat(mat_path, data_zip) 
+            # mat_path = './Visualization/HGAT_pyr_all_mlp1_fold{}.mat'.format(fold)
+            # xs, ys, y_pred = visualize(test_loader, model)
+            # data_zip = {'x':xs.numpy(), 'y':ys.numpy(), 'y_pred':y_pred.numpy()}
+            # savemat(mat_path, data_zip) 
