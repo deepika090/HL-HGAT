@@ -139,7 +139,7 @@ class ABCD_MLGC(Dataset):
 
 
 ###############################################################################
-##################### Only Edge Convolution & Pooling #########################
+##################### MODEL #########################
 ###############################################################################
 class HL_HGCNN_ABCD_dense_int3_attpool(torch.nn.Module):
     def __init__(self, channels=[2,2,2], filters=[32,64,128], mlp_channels=[], K=4, node_dim=64, init_time_conv=64,
