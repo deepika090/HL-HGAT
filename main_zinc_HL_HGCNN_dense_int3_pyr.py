@@ -193,7 +193,7 @@ if __name__ == '__main__':
         torch.manual_seed(fold)
         temp = str(args.c1) +str(args.c2)+str(args.c3) +'conv'
         mlp_channels = [] if args.mlp_channels==0 else [256]*args.mlp_channels
-        mlp_num = 0 if args.mlp_channels==0 else 1
+        mlp_num = args.mlp_channels
         
         model = HL_HGCNN_zinc_dense_int3_pyr(channels=[args.c1,args.c2,args.c3], filters=[args.filters,args.filters*2,args.filters*4], mlp_channels=mlp_channels, 
                           K=args.K, dropout_ratio=args.dropout_ratio, dropout_ratio_mlp=0.0, keig=keig).to(device) 
