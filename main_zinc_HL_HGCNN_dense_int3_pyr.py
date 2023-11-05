@@ -197,7 +197,7 @@ if __name__ == '__main__':
         
         model = HL_HGCNN_zinc_dense_int3_pyr(channels=[args.c1,args.c2,args.c3], filters=[args.filters,args.filters*2,args.filters*4], mlp_channels=mlp_channels, 
                           K=args.K, dropout_ratio=args.dropout_ratio, dropout_ratio_mlp=0.0, keig=keig).to(device) 
-        save_name = 'HGCNN_dense_int3_eigpe_pyr_ZINC_'+temp+'_k'+str(args.K)+'_batch'+str(args.batch_size)+'_mlp'++str(mlp_num)+'_FOLD{}'.format(fold)
+        save_name = 'HGCNN_dense_int3_eigpe_pyr_ZINC_'+temp+'_k'+str(args.K)+'_batch'+str(args.batch_size)+'_mlp'+str(mlp_num)+'_FOLD{}'.format(fold)
 
         save_path = './weights/' + save_name + '.pt'
         txt_path = './records/' + save_name + '.txt'
